@@ -1,25 +1,22 @@
 from flask import Blueprint, request, jsonify
-from app.controllers.auth_controller import AuthController
 from app import db
 from sqlalchemy import text
+from app.controllers.authcontroller import AuthController
 
 auth_bp = Blueprint("auth", __name__)
 controller = AuthController()
 
 def response_handler(result):
-    status_code = result.get("code", 200)
-    return jsonify(result), status_code
+    if isinstance(result, tuple):
+        data, status_code = result
+        return jsonify(data), status_code
 
+    return jsonify(result), 200
+    
 @auth_bp.route("/auth/login", methods=["POST"])
 def login():
     data = request.json
     return response_handler(controller.login(data))
-
-
-@auth_bp.route("/auth/refresh", methods=["POST"])
-def refresh():
-    return response_handler(controller.refresh())
-
 
 @auth_bp.route("/health/db", methods=["GET"])
 def db_health():
