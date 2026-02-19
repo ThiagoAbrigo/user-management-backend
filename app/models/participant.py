@@ -18,13 +18,4 @@ class Participant(db.Model):
     status = db.Column(db.String(20), nullable=False)
     type = db.Column(db.String(20), nullable=False)
     program = db.Column(db.String(50), nullable=True)  # "INICIACION" or "FUNCIONAL"
-    java_external = db.Column(db.String(100), nullable=True)  # ID externo del microservicio Java
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)  # Si también es User (docente/pasante)
-    assessments = db.relationship("Assessment", backref="participant", lazy=True)
-
-
-    def __repr__(self):
-        return f"<Participant {self.firstName} {self.lastName}>"
-
-    def authenticate(self, email, dni):
-        return self.email == email and self.dni == dni
