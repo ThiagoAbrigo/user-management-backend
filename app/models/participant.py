@@ -8,14 +8,13 @@ class Participant(db.Model):
     external_id = db.Column(
         db.String(36), default=lambda: str(uuid.uuid4()), unique=True, nullable=False
     )
-    firstName = db.Column(db.String(100), nullable=False)
-    lastName = db.Column(db.String(100), nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    estate = db.Column(db.String(100), nullable=False)
     age = db.Column(db.Integer, nullable=False)
     dni = db.Column(db.String(20), unique=True, nullable=False)
-    phone = db.Column(db.String(20), nullable=True)
     email = db.Column(db.String(120), unique=True, nullable=True)
+    role = db.Column(db.String(20), nullable=False)
+    password = db.Column(db.String(255), nullable=False)
     address = db.Column(db.String(200), nullable=False)
     status = db.Column(db.String(20), nullable=False)
-    type = db.Column(db.String(20), nullable=False)
-    program = db.Column(db.String(50), nullable=True)  # "INICIACION" or "FUNCIONAL"
-    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)  # Si también es User (docente/pasante)
+    # user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)  # Si también es User (docente/pasante)
