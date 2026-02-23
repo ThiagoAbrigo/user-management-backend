@@ -10,7 +10,7 @@ class Responsible(db.Model):
         db.String(36), default=lambda: str(uuid.uuid4()), unique=True, nullable=False
     )
     name = db.Column(db.String(100), nullable=False)
-    dni = db.Column(db.String(20), nullable=False)
+    dni = db.Column(db.String(10), nullable=False)
     phone = db.Column(db.String(20), nullable=False)
     participant_id = db.Column(db.Integer, db.ForeignKey("participant.id"))
     participant = db.relationship(

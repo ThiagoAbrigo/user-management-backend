@@ -6,8 +6,9 @@ controller = UserController()
 
 
 def response_handler(result):
-    status_code = result.get("code", 200)
-    return jsonify(result), status_code
+    if isinstance(result, tuple):
+        data, status_code = result
+        return jsonify(data), status_code
 
 
 @user_bp.route("/users", methods=["GET"])
@@ -15,10 +16,10 @@ def listar_users():
     result = controller.get_users()
     return response_handler(result)
 
-@user_bp.route("/save-participants", methods=["POST"])
-def create_participant():
+@user_bp.route("/save-user", methods=["POST"])
+def create_users():
     data = request.get_json(silent=True) or {}
-    return response_handler(controller.create_participant(data))
+    return response_handler(controller.create_user(data))
 
 @user_bp.route("/participants/<string:external_id>", methods=["PUT"])
 def update_participant(external_id):
