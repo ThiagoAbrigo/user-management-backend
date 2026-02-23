@@ -1,29 +1,35 @@
-from app.models import User
 from werkzeug.security import check_password_hash
 from app.utils.responses import success_response, error_response
+from app.models import Participant
 
 
 class AuthController:
     def login(self, data):
-
         email = data.get("email")
         password = data.get("password")
 
         if not email or not password:
             return error_response("Email y contraseña son obligatorios"), 400
 
-        user = User.query.filter_by(email=email).first()
+        participant = Participant.query.filter_by(email=email).first()
 
-        if not user:
-            return error_response("Usuario no encontrado", 404), 404
+        if not participant:
+            return error_response("Usuario no encontrado"), 404
 
-        if not check_password_hash(user.password, password):
-            return error_response("Contraseña incorrecta", 401), 401
+        if not check_password_hash(participant.password, password):
+            return error_response("Contraseña incorrecta"), 401
 
         return (
             success_response(
                 "Login exitoso",
-                {"id": user.id, "email": user.email, "role": user.role},
+                {
+                    "id": participant.id,
+                    "external_id": participant.external_id,
+                    "name": participant.name,
+                    "email": participant.email,
+                    "role": participant.role,
+                    "status": participant.status,
+                },
             ),
             200,
         )

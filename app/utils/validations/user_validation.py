@@ -1,7 +1,6 @@
 import re
 from app.models.participant import Participant
 from app.models.responsible import Responsible
-from app.models.user import User
 from app.utils.constants.message import (
     DNI_EXISTS,
     DNI_LENGTH,
