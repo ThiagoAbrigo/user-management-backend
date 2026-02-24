@@ -21,8 +21,7 @@ def create_users():
     data = request.get_json(silent=True) or {}
     return response_handler(controller.create_user(data))
 
-@user_bp.route("/participants/<string:external_id>", methods=["PUT"])
-def update_participant(external_id):
-    """Actualiza los datos de un participante y su responsable (si tiene)"""
-    data = request.get_json(silent=True) or {}
-    return response_handler(controller.update_participant(external_id, data))
+@user_bp.route("/responsibles/<dni>", methods=["GET"])
+def obtener_responsable(dni):
+    result = controller.get_responsible_by_dni(dni)
+    return response_handler(result)
