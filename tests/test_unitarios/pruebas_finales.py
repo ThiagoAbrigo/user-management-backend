@@ -1,389 +1,310 @@
 import unittest
 from unittest.mock import patch, MagicMock
 from app.controllers.usercontroller import UserController
-from app.controllers.assessment_controller import AssessmentController
-from app.controllers.evaluation_controller import EvaluationController
-from app.controllers.auth_controller import AuthController
+from app.controllers.authcontroller import AuthController
+from werkzeug.security import check_password_hash
 
-class TestFinales(unittest.TestCase):
-    #python -m unittest tests.test_unitarios.pruebas_finales -v
-    """Pruebas Unitarias con Mocks """
+
+class TestUserController(unittest.TestCase):
+    """Clase de prueba unificada para UserController y AuthController"""
 
     def setUp(self):
-        self.assessment_controller = AssessmentController()
-        self.evaluation_controller = EvaluationController()
-        
-    @patch("app.controllers.auth_controller.AuthService")
-    def test_tc_01_login_success(self, mock_auth_service):
-        """TC-01: Inicio de Sesión - Verifica ingreso exitoso con credenciales correctas"""
-        mock_auth_service.return_value.login.return_value = ({"token": "valid_token"}, 200)
-        
-        auth_controller = AuthController()
-        response, status_code = auth_controller.login({"email": "admin@kallpa.com", "password": "123456"})
+        """Configuración común para todas las pruebas"""
+        self.user_controller = UserController()
+        self.auth_controller = AuthController()
 
-        self.assertEqual(status_code, 200)
-        self.assertEqual(response["token"], "valid_token")
+        # Datos válidos para crear usuario
+        self.valid_create_data = {
+            "name": "Juan Perez",
+            "estate": "UNIVERSITARIO",
+            "age": "25",
+            "dni": "1234567890",
+            "email": "juan@unl.edu.ec",
+            "password": "123456",
+            "address": "Loja"
+        }
 
-    @patch("app.controllers.auth_controller.AuthService")
-    def test_tc_02_login_failure(self, mock_auth_service):
-        """TC-02: Inicio de Sesión - Verifica fallo con contraseña incorrecta"""
-        mock_auth_service.return_value.login.return_value = ({"msg": "Credenciales inválidas"}, 401)
-        
-        auth_controller = AuthController()
-        response, status_code = auth_controller.login({"email": "admin@kallpa.com", "password": "wrong"})
+        # Usuario mock existente para actualización y login
+        self.mock_user = MagicMock()
+        self.mock_user.id = 1
+        self.mock_user.external_id = "ABC123"
+        self.mock_user.name = "Juan"
+        self.mock_user.estate = "UNIVERSITARIO"
+        self.mock_user.age = 25
+        self.mock_user.dni = "1234567890"
+        self.mock_user.email = "juan@unl.edu.ec"
+        self.mock_user.password = "hashed_password_123"
+        self.mock_user.address = "Loja"
+        self.mock_user.role = "participant"
+        self.mock_user.status = True
+        self.mock_user.responsibles = []  # Lista vacía de responsables
 
-        self.assertEqual(status_code, 401)
-        self.assertIn("msg", response)
+        # Mock de responsable para pruebas con responsable asignado
+        self.mock_responsible = MagicMock()
+        self.mock_responsible.name = "Carlos Perez"
+        self.mock_responsible.dni = "0987654321"
+        self.mock_responsible.phone = "0999999999"
 
-    @patch("app.controllers.usercontroller.UserController._get_token")
+        # Datos válidos para actualizar usuario
+        self.valid_update_data = {
+            "name": "Juan Updated",
+            "estate": "UNIVERSITARIO",
+            "age": "26",
+            "dni": "1234567890",
+            "email": "juan@unl.edu.ec",
+            "address": "Quito"
+        }
+
+        # Datos válidos para login
+        self.valid_login_data = {
+            "email": "juan@unl.edu.ec",
+            "password": "123456"
+        }
+
+    # =====================================
+    # PRUEBAS DE CREACIÓN DE USUARIO
+    # =====================================
+
+    def test_create_user_missing_required_fields(self):
+        """Prueba: Creación con campos obligatorios faltantes"""
+        invalid_data = {}
+
+        response, status = self.user_controller.create_user(invalid_data)
+
+        self.assertEqual(status, 400)
+        self.assertIn("errors", response)
+        self.assertIn("name", response["errors"])
+
     @patch("app.controllers.usercontroller.Participant")
-    def test_tc_06_register_duplicate_dni(self, mock_participant, mock_get_token):
-        """TC-06: Registrar Participante - Verifica validación de DNI duplicado"""
-        mock_get_token.return_value = "Bearer mock_token"
+    @patch("app.controllers.usercontroller.Responsible")
+    def test_create_user_invalid_university_email(
+        self, mock_responsible, mock_participant
+    ):
+        """Prueba: Email inválido para usuario universitario"""
+        data = self.valid_create_data.copy()
+        data["email"] = "juan@gmail.com"
+
+        mock_participant.query.filter_by.return_value.first.return_value = None
+        mock_responsible.query.filter_by.return_value.first.return_value = None
+
+        response, status = self.user_controller.create_user(data)
+
+        self.assertEqual(status, 400)
+        self.assertIn("email", response["errors"])
+
+    @patch("app.controllers.usercontroller.Participant")
+    @patch("app.controllers.usercontroller.Responsible")
+    def test_create_user_duplicate_dni(
+        self, mock_responsible, mock_participant
+    ):
+        """Prueba: DNI duplicado al crear usuario"""
         mock_participant.query.filter_by.return_value.first.return_value = MagicMock()
-        
-        data = {
-            "firstName": "Ana",
-            "lastName": "Loja",
-            "dni": "1100000001",
-            "age": 22,
-            "address": "Calle Test",
-            "phone": "0987654321",
-            "email": "ana@test.com",
-            "program": "FUNCIONAL",
-            "type": "ESTUDIANTE"
-        }
-        
-        controller = UserController()
-        response = controller.create_participant(data)
-        
-        self.assertEqual(response["code"], 400)
-        self.assertIn("dni", response["data"])
-        self.assertEqual(response["data"]["dni"], "El DNI ya está registrado")
 
-    @patch("app.controllers.usercontroller.UserController._get_token")
-    @patch("app.controllers.usercontroller.Participant")
-    def test_tc_07_register_empty_fields(self, mock_participant, mock_get_token):
-        """TC-07: Registrar - Verifica validación cuando faltan campos requeridos"""
-        mock_get_token.return_value = "Bearer mock_token"
-        data = {}
-        controller = UserController()
-        response = controller.create_participant(data)
-        
-        self.assertEqual(response["code"], 400)
-        self.assertIn("msg", response) 
+        response, status = self.user_controller.create_user(self.valid_create_data)
 
-    @patch("app.controllers.usercontroller.UserController._get_token")
+        self.assertEqual(status, 400)
+        self.assertIn("dni", response["errors"])
+
+    @patch("app.controllers.usercontroller.db")
     @patch("app.controllers.usercontroller.Participant")
-    @patch("app.controllers.usercontroller.User")
-    def test_tc_14_dni_invalid_validations(self, mock_user, mock_participant, mock_get_token):
-        """TC-14, TC-15: Validaciones de DNI - Verifica longitud y ceros"""
-        mock_get_token.return_value = "Bearer mock_token"
+    @patch("app.controllers.usercontroller.Responsible")
+    def test_create_user_success(
+        self, mock_responsible, mock_participant, mock_db
+    ):
+        """Prueba: Creación exitosa de usuario"""
         mock_participant.query.filter_by.return_value.first.return_value = None
-        
-        scenarios = [
-            ("12345", "DNI debe tener exactamente 10 dígitos"),
-            ("0000000000", "DNI no puede ser solo ceros"),
-            ("1234567890", "DNI no puede ser un número secuencial") 
-        ]
-        
-        controller = UserController()
-        for dni_val, expected_msg in scenarios:
-            data = {
-                "firstName": "Test",
-                "lastName": "Dni",
-                "dni": dni_val,
-                "age": 25,
-                "phone": "0991234567",
-                "program": "FUNCIONAL",
-                "type": "ESTUDIANTE"
-            }
-            response = controller.create_participant(data)
-            self.assertEqual(response["code"], 400)
-            self.assertIn(expected_msg, response["data"]["dni"])
+        mock_responsible.query.filter_by.return_value.first.return_value = None
 
-    @patch("app.controllers.usercontroller.db.session")
-    @patch("app.controllers.usercontroller.UserController._get_token")
+        mock_user_instance = MagicMock()
+        mock_user_instance.id = 1
+        mock_user_instance.external_id = "ABC123"
+
+        mock_participant.return_value = mock_user_instance
+
+        response, status = self.user_controller.create_user(self.valid_create_data)
+
+        self.assertEqual(status, 201)
+        self.assertEqual(response["msg"], "Usuario creado correctamente")
+        mock_db.session.add.assert_called()
+        mock_db.session.commit.assert_called()
+
+    # =====================================
+    # PRUEBAS DE ACTUALIZACIÓN DE USUARIO
+    # =====================================
+
+    @patch("app.controllers.usercontroller.db")
+    @patch("app.controllers.usercontroller.Responsible")
     @patch("app.controllers.usercontroller.Participant")
-    def test_tc_16_phone_validations(self, mock_participant, mock_get_token, mock_session):
-        """TC-16, TC-21, TC-24: Validaciones de Teléfono - Verifica formato inválido"""
-        mock_get_token.return_value = "Bearer mock_token"
-        mock_participant.query.filter_by.return_value.first.return_value = None
-        
-        scenarios = [
-            ("1234567890", "Teléfono debe iniciar con 0"),
-            ("098abc1234", "Teléfono debe contener solo números"),
-            ("0123456789", "Teléfono no puede ser un número secuencial")
-        ]
-        
-        controller = UserController()
-        for phone_val, expected_msg in scenarios:
-            data = {
-                "firstName": "Test",
-                "lastName": "Phone",
-                "dni": "1100000005",
-                "age": 25,
-                "phone": phone_val,
-                "program": "FUNCIONAL",
-                "type": "ESTUDIANTE"
-            }
-            response = controller.create_participant(data)
-            self.assertEqual(response["code"], 400, f"Failed for phone: {phone_val}")
-            self.assertIn(expected_msg, response["data"]["phone"])
+    def test_update_user_success(
+        self, mock_participant, mock_responsible, mock_db
+    ):
+        """Prueba: Actualización exitosa de usuario"""
+        mock_participant.query.filter_by.return_value.first.return_value = self.mock_user
 
-    @patch("app.controllers.usercontroller.db.session")
-    @patch("app.controllers.usercontroller.UserController._get_token")
+        mock_participant.query.filter.return_value.first.return_value = None
+        mock_responsible.query.filter_by.return_value.first.return_value = None
+        mock_responsible.query.filter.return_value.first.return_value = None
+
+        response, status = self.user_controller.update_user("ABC123", self.valid_update_data)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response["msg"], "Usuario actualizado correctamente")
+        mock_db.session.commit.assert_called_once()
+
+    @patch("app.controllers.usercontroller.Responsible")
     @patch("app.controllers.usercontroller.Participant")
-    def test_tc_18_program_age_restrictions(self, mock_participant, mock_get_token, mock_session):
-        """TC-18: Menor de 16 intentando inscribirse a FUNCIONAL - Verifica restricción de edad"""
-        mock_get_token.return_value = "Bearer mock_token"
+    def test_update_user_empty_fields(self, mock_participant, mock_responsible):
+        """Prueba: Actualización con campos vacíos"""
+        mock_participant.query.filter_by.return_value.first.return_value = self.mock_user
+
+        # Evitar que entre a DB real
+        mock_participant.query.filter.return_value.first.return_value = None
+        mock_responsible.query.filter_by.return_value.first.return_value = None
+        mock_responsible.query.filter.return_value.first.return_value = None
+
+        empty_data = {
+            "name": "",
+            "estate": "",
+            "age": "",
+            "dni": "",
+            "email": ""
+        }
+
+        response, status = self.user_controller.update_user("ABC123", empty_data)
+
+        self.assertEqual(status, 400)
+        self.assertIn("errors", response)
+
+    @patch("app.controllers.usercontroller.Responsible")
+    @patch("app.controllers.usercontroller.Participant")
+    def test_update_user_duplicate_dni(
+        self, mock_participant, mock_responsible
+    ):
+        """Prueba: Actualización con DNI ya registrado"""
+        mock_participant.query.filter_by.return_value.first.return_value = self.mock_user
+
+        mock_participant.query.filter.return_value.first.return_value = MagicMock()
+
+        data = self.valid_update_data.copy()
+        data["dni"] = "9999999999"
+
+        response, status = self.user_controller.update_user("ABC123", data)
+
+        self.assertEqual(status, 400)
+        self.assertIn("dni", response["errors"])
+
+    # =====================================
+    # PRUEBAS DE LOGIN
+    # =====================================
+
+    def test_login_missing_credentials(self):
+        """Prueba: Login sin email o contraseña"""
+        # Caso: Sin email ni password
+        response, status = self.auth_controller.login({})
+        self.assertEqual(status, 400)
+        self.assertEqual(response["msg"], "Email y contraseña son obligatorios")
+
+        # Caso: Solo email
+        response, status = self.auth_controller.login({"email": "test@test.com"})
+        self.assertEqual(status, 400)
+        self.assertEqual(response["msg"], "Email y contraseña son obligatorios")
+
+        # Caso: Solo password
+        response, status = self.auth_controller.login({"password": "123456"})
+        self.assertEqual(status, 400)
+        self.assertEqual(response["msg"], "Email y contraseña son obligatorios")
+
+    @patch("app.controllers.authcontroller.Participant")
+    def test_login_user_not_found(self, mock_participant):
+        """Prueba: Login con email no registrado"""
         mock_participant.query.filter_by.return_value.first.return_value = None
+
+        response, status = self.auth_controller.login(self.valid_login_data)
+
+        self.assertEqual(status, 404)
+        self.assertEqual(response["msg"], "Usuario no encontrado")
+
+    @patch("app.controllers.authcontroller.check_password_hash")
+    @patch("app.controllers.authcontroller.Participant")
+    def test_login_incorrect_password(self, mock_participant, mock_check_password):
+        """Prueba: Login con contraseña incorrecta"""
+        mock_participant.query.filter_by.return_value.first.return_value = self.mock_user
+        mock_check_password.return_value = False
+
+        response, status = self.auth_controller.login(self.valid_login_data)
+
+        self.assertEqual(status, 401)
+        self.assertEqual(response["msg"], "Contraseña incorrecta")
+        mock_check_password.assert_called_once_with(self.mock_user.password, self.valid_login_data["password"])
+
+    @patch("app.controllers.authcontroller.check_password_hash")
+    @patch("app.controllers.authcontroller.Participant")
+    def test_login_success_without_responsible(self, mock_participant, mock_check_password):
+        """Prueba: Login exitoso sin responsable asignado"""
+        mock_participant.query.filter_by.return_value.first.return_value = self.mock_user
+        mock_check_password.return_value = True
+
+        response, status = self.auth_controller.login(self.valid_login_data)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response["msg"], "Login exitoso")
         
-        data = {
-            "firstName": "Menor",
-            "lastName": "Funcional",
-            "dni": "1100000006",
-            "age": 14,
-            "phone": "0991234567",
-            "program": "FUNCIONAL",
-            "type": "ESTUDIANTE"
-        }
+        # Verificar datos del usuario en la respuesta
+        user_data = response["data"]
+        self.assertEqual(user_data["id"], self.mock_user.id)
+        self.assertEqual(user_data["external_id"], self.mock_user.external_id)
+        self.assertEqual(user_data["name"], self.mock_user.name)
+        self.assertEqual(user_data["email"], self.mock_user.email)
+        self.assertEqual(user_data["role"], self.mock_user.role)
         
-        controller = UserController()
-        response = controller.create_participant(data)
-        self.assertEqual(response["code"], 400)
-        self.assertIn("Menores de 16 años solo pueden inscribirse a INICIACIÓN", response["data"]["program"])
+        # Verificar que los datos del responsable sean None
+        self.assertIsNone(user_data["nombreResponsable"])
+        self.assertIsNone(user_data["dniResponsable"])
+        self.assertIsNone(user_data["telefonoResponsable"])
 
-    @patch("app.controllers.usercontroller.UserController._get_token")
-    @patch("app.controllers.usercontroller.java_sync")
-    def test_tc_12_search_participant_java(self, mock_java_sync, mock_get_token):
-        """TC-12: Buscar Participante en Java - Verifica búsqueda exitosa"""
-        mock_get_token.return_value = "Bearer mock_token"
+    @patch("app.controllers.authcontroller.check_password_hash")
+    @patch("app.controllers.authcontroller.Participant")
+    def test_login_success_with_responsible(self, mock_participant, mock_check_password):
+        """Prueba: Login exitoso con responsable asignado"""
+        # Configurar usuario con responsable
+        self.mock_user.responsibles = [self.mock_responsible]
+        mock_participant.query.filter_by.return_value.first.return_value = self.mock_user
+        mock_check_password.return_value = True
+
+        response, status = self.auth_controller.login(self.valid_login_data)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response["msg"], "Login exitoso")
         
-        mock_java_sync.search_by_identification.return_value = {
-            "found": True, 
-            "data": {"name": "Found User"}
-        }
+        # Verificar datos del usuario en la respuesta
+        user_data = response["data"]
+        self.assertEqual(user_data["id"], self.mock_user.id)
+        self.assertEqual(user_data["name"], self.mock_user.name)
         
-        controller = UserController()
-        response = controller.search_in_java("1100000007")
+        # Verificar que los datos del responsable estén presentes
+        self.assertEqual(user_data["nombreResponsable"], self.mock_responsible.name)
+        self.assertEqual(user_data["dniResponsable"], self.mock_responsible.dni)
+        self.assertEqual(user_data["telefonoResponsable"], self.mock_responsible.phone)
+
+    @patch("app.controllers.authcontroller.check_password_hash")
+    @patch("app.controllers.authcontroller.Participant")
+    def test_login_case_insensitive_email(self, mock_participant, mock_check_password):
+        """Prueba: Login con email en mayúsculas/minúsculas"""
+        mock_participant.query.filter_by.return_value.first.return_value = self.mock_user
+        mock_check_password.return_value = True
+
+        # Probar con email en mayúsculas
+        login_data = self.valid_login_data.copy()
+        login_data["email"] = "JUAN@UNL.EDU.EC"
+
+        response, status = self.auth_controller.login(login_data)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response["msg"], "Login exitoso")
         
-        self.assertEqual(response["code"], 200)
-        self.assertEqual(response["msg"], "Participante encontrado en Java")
+        # Verificar que se buscó con el email exacto (en minúsculas)
+        mock_participant.query.filter_by.assert_called_with(email="JUAN@UNL.EDU.EC")
 
-    @patch("app.controllers.usercontroller.UserController._get_token")
-    @patch("app.controllers.usercontroller.java_sync")
-    def test_tc_13_search_participant_not_found(self, mock_java_sync, mock_get_token):
-        """TC-13: Buscar Participante en Java - Verifica usuario no encontrado"""
-        mock_get_token.return_value = "Bearer mock_token"
-        
-        mock_java_sync.search_by_identification.return_value = {"found": False}
-        
-        controller = UserController()
-        response = controller.search_in_java("1100000008")
-        
-        self.assertEqual(response["code"], 404)
-        self.assertEqual(response["msg"], "Participante no encontrado en Java")
-    @patch("app.controllers.assessment_controller.db.session")
-    @patch("app.controllers.assessment_controller.log_activity")
-    @patch("app.controllers.assessment_controller.Participant")
-    def test_register_success(self, mock_participant, mock_log_activity, mock_session):
-        fake_participant = MagicMock()
-        fake_participant.id = 1
-        fake_participant.firstName = "Carlos"
-        fake_participant.lastName = "Lopez"
-        fake_participant.external_id = "abc123"
-
-        mock_participant.query.filter_by.return_value.first.return_value = (
-            fake_participant
-        )
-
-        data = {
-            "participant_external_id": "abc123",
-            "weight": 70,  # valor válido
-            "height": 1.75,
-            "waistPerimeter": 0.8,
-            "wingspan": 1.7,
-            "date": "2025-01-05",
-        }
-
-        result = self.assessment_controller.register(data)
-
-        print(result["msg"])
-        self.assertEqual(result["code"], 200)
-        self.assertEqual(result["status"], "ok")
-        self.assertIn("bmi", result["data"])
-
-        mock_session.add.assert_called_once()
-        mock_session.commit.assert_called_once()
-        mock_log_activity.assert_called_once()
-
-    @patch("app.controllers.assessment_controller.db.session")
-    @patch("app.controllers.assessment_controller.log_activity")
-    @patch("app.controllers.assessment_controller.Participant")
-    def test_register_negative_weight(
-        self, mock_participant, mock_log_activity, mock_session
-    ):
-        fake_participant = MagicMock()
-        fake_participant.id = 1
-        fake_participant.firstName = "Carlos"
-        fake_participant.lastName = "Lopez"
-        fake_participant.external_id = "abc123"
-
-        mock_participant.query.filter_by.return_value.first.return_value = (
-            fake_participant
-        )
-
-        data = {
-            "participant_external_id": "abc123",
-            "weight": -80,  # valor inválido
-            "height": -1.76,
-            "waistPerimeter": 0.1,  # numérico pero no obligatorio
-            "armPerimeter": -1,  # inválido
-            "calfPerimeter": None,  # permitido
-            "date": None,
-        }
-
-        result = self.assessment_controller.register(data)
-
-        self.assertEqual(result["code"], 400)
-        self.assertEqual(result["status"], "error")
-        self.assertIn("weight", result["errors"])
-        self.assertIn("armPerimeter", result["errors"])
-        self.assertIn("date", result["errors"])
-        print(result["errors"]["weight"])
-
-    @patch("app.controllers.assessment_controller.db.session")
-    @patch("app.controllers.assessment_controller.log_activity")
-    @patch("app.controllers.assessment_controller.Participant")
-    def test_register_validate_all_fields(
-        self, mock_participant, mock_log_activity, mock_session
-    ):
-        fake_participant = MagicMock()
-        fake_participant.id = 1
-        fake_participant.firstName = "Carlos"
-        fake_participant.lastName = "Lopez"
-        fake_participant.external_id = "abc123"
-        mock_participant.query.filter_by.return_value.first.return_value = (
-            fake_participant
-        )
-
-        data = {
-            "participant_external_id": None,  # obligatorio faltante
-            "weight": -5,  # inválido
-            "height": 3.0,  # fuera de rango
-            "waistPerimeter": 0.1,  # numérico pero no obligatorio
-            "armPerimeter": -1,  # inválido
-            "legPerimeter": 5.0,  # fuera de rango
-            "calfPerimeter": None,  # permitido
-            "date": None,  # obligatorio faltante
-        }
-
-        result = self.assessment_controller.register(data)
-
-        self.assertEqual(result["code"], 400)
-        self.assertEqual(result["status"], "error")
-        self.assertIn("participant_external_id", result["errors"])
-        self.assertIn("weight", result["errors"])
-        self.assertIn("height", result["errors"])
-        self.assertIn("armPerimeter", result["errors"])
-        self.assertIn("date", result["errors"])
-
-        mock_session.add.assert_not_called()
-        mock_session.commit.assert_not_called()
-        mock_log_activity.assert_not_called()
-
-    @patch("app.controllers.evaluation_controller.db.session")
-    @patch("app.controllers.evaluation_controller.TestExercise")
-    @patch("app.controllers.evaluation_controller.Test")
-    @patch("app.controllers.evaluation_controller.validate_exercises")
-    @patch("app.controllers.evaluation_controller.validate_test_fields")
-    @patch("app.controllers.evaluation_controller.validate_register_input")
-    def test_tc_02_registro_test_exitoso(
-        self,
-        mock_validate_register,
-        mock_validate_test_fields,
-        mock_validate_exercises,
-        mock_test,
-        mock_test_exercise,
-        mock_session
-    ):
-
-        # Validaciones no devuelven errores
-        mock_validate_register.return_value = {}
-        mock_validate_test_fields.return_value = {}
-        mock_validate_exercises.return_value = {}
-
-        fake_test = MagicMock()
-        fake_test.id = 1
-        fake_test.external_id = "test-123"
-        fake_test.name = "test de hipertrofia"
-        fake_test.frequency_months = 3
-        fake_test.description = "Primer test de hipertrofia"
-
-        mock_test.return_value = fake_test
-
-        data = {
-            "name": "Test de hipertrofia",
-            "description": "Primer test de hipertrofia",
-            "frequency_months": 3,
-            "exercises": [
-                {"name": "Press Banca", "unit": "repeticiones"},
-            ],
-        }
-
-        result = self.evaluation_controller.register(data)
-
-        self.assertEqual(result["code"], 200)
-        self.assertEqual(result["status"], "ok")
-        self.assertIn("test_external_id", result["data"])
-
-        mock_session.add.assert_called()
-        mock_session.commit.assert_called_once()
-
-
-    # TC-03: Registro de Test - Falla por ejercicios vacíos
-    @patch("app.controllers.evaluation_controller.db.session")
-    @patch("app.controllers.evaluation_controller.Test")
-    def test_tc_03_registro_test_sin_ejercicios(
-        self, mock_test, mock_session
-    ):
-        mock_test.query.filter_by.return_value.first.return_value = None
-
-        data = {
-            "name": "Test sin ejercicios",
-            "description": "Test inválido",
-            "frequency_months": 3,
-            "exercises": [
-                {"name": "", "unit": ""}
-            ],
-        }
-
-        result = self.evaluation_controller.register(data)
-
-        print(f"\n=== TC-03 RESULT ===")
-        print(f"Code: {result.get('code')}")
-        print(f"Status: {result.get('status')}")
-        print(f"Msg: {result.get('msg')}")
-        print(f"Validation Errors: {result.get('data', {}).get('validation_errors')}")
-        print("===================\n")
-
-        self.assertEqual(result["code"], 400)
-        self.assertEqual(result["status"], "error")
-        self.assertEqual(result["msg"], "Error de validación")
-        
-        validation_errors = result.get("data", {}).get("validation_errors", {})
-        
-        # El controlador valida cada ejercicio individualmente
-        self.assertIn("exercises[0].name", validation_errors)
-        self.assertIn("exercises[0].unit", validation_errors)
-        
-        # Verificar mensajes de error específicos
-        self.assertEqual(validation_errors["exercises[0].name"], "Campo requerido")
-        self.assertEqual(validation_errors["exercises[0].unit"], "Campo requerido")
-
-        mock_session.add.assert_not_called()
-        mock_session.commit.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -1,123 +1,95 @@
+# comando para ejecutar las pruebas
+# python -m unittest tests.pruebas_santiago -v
 import unittest
 from unittest.mock import patch, MagicMock
-from app.controllers.assessment_controller import AssessmentController
+from app.controllers.usercontroller import UserController
 
 
-class TestAssessmentController(unittest.TestCase):
-    # comando para ejecutar las pruebas
-    # python -m unittest tests.pruebas_santiago -v
+class RegisterControllerUser(unittest.TestCase):
 
     def setUp(self):
-        self.controller = AssessmentController()
+        self.controller = UserController()
 
-    @patch("app.controllers.assessment_controller.db.session")
-    @patch("app.controllers.assessment_controller.log_activity")
-    @patch("app.controllers.assessment_controller.Participant")
-    def test_register_success(self, mock_participant, mock_log_activity, mock_session):
-        fake_participant = MagicMock()
-        fake_participant.id = 1
-        fake_participant.firstName = "Carlos"
-        fake_participant.lastName = "Lopez"
-        fake_participant.external_id = "abc123"
-
-        mock_participant.query.filter_by.return_value.first.return_value = (
-            fake_participant
-        )
-
-        data = {
-            "participant_external_id": "abc123",
-            "weight": 70,  # valor válido
-            "height": 1.75,
-            "waistPerimeter": 0.8,
-            "wingspan": 1.7,
-            "date": "2025-01-05",
+        self.valid_data = {
+            "name": "Juan Perez",
+            "estate": "UNIVERSITARIO",
+            "age": "25",
+            "dni": "1234567890",
+            "email": "juan@unl.edu.ec",
+            "password": "123456",
+            "address": "Loja"
         }
 
-        result = self.controller.register(data)
-
-        print(result["msg"])
-        self.assertEqual(result["code"], 200)
-        self.assertEqual(result["status"], "ok")
-        self.assertIn("bmi", result["data"])
-
-        mock_session.add.assert_called_once()
-        mock_session.commit.assert_called_once()
-        mock_log_activity.assert_called_once()
-
-    @patch("app.controllers.assessment_controller.db.session")
-    @patch("app.controllers.assessment_controller.log_activity")
-    @patch("app.controllers.assessment_controller.Participant")
-    def test_register_negative_weight(
-        self, mock_participant, mock_log_activity, mock_session
+    # ===============================
+    # TEST CREACIÓN EXITOSA
+    # ===============================
+    @patch("app.controllers.usercontroller.db")
+    @patch("app.controllers.usercontroller.Participant")
+    @patch("app.controllers.usercontroller.Responsible")
+    def test_create_user_success(
+        self, mock_responsible, mock_participant, mock_db
     ):
-        fake_participant = MagicMock()
-        fake_participant.id = 1
-        fake_participant.firstName = "Carlos"
-        fake_participant.lastName = "Lopez"
-        fake_participant.external_id = "abc123"
+        mock_participant.query.filter_by.return_value.first.return_value = None
+        mock_responsible.query.filter_by.return_value.first.return_value = None
 
-        mock_participant.query.filter_by.return_value.first.return_value = (
-            fake_participant
-        )
+        mock_user_instance = MagicMock()
+        mock_user_instance.id = 1
+        mock_user_instance.external_id = "ABC123"
 
-        data = {
-            "participant_external_id": "abc123",
-            "weight": -80,  # valor inválido
-            "height": -1.76,
-            "waistPerimeter": 0.1,  # numérico pero no obligatorio
-            "armPerimeter": -1,  # inválido
-            "calfPerimeter": None,  # permitido
-            "date": None,
-        }
+        mock_participant.return_value = mock_user_instance
 
-        result = self.controller.register(data)
+        response, status = self.controller.create_user(self.valid_data)
 
-        self.assertEqual(result["code"], 400)
-        self.assertEqual(result["status"], "error")
-        self.assertIn("weight", result["errors"])
-        self.assertIn("armPerimeter", result["errors"])
-        self.assertIn("date", result["errors"])
-        print(result["errors"]["weight"])
+        self.assertEqual(status, 201)
+        self.assertEqual(response["msg"], "Usuario creado correctamente")
+        mock_db.session.add.assert_called()
+        mock_db.session.commit.assert_called()
 
-    @patch("app.controllers.assessment_controller.db.session")
-    @patch("app.controllers.assessment_controller.log_activity")
-    @patch("app.controllers.assessment_controller.Participant")
-    def test_register_validate_all_fields(
-        self, mock_participant, mock_log_activity, mock_session
+    # ===============================
+    # TEST CAMPOS OBLIGATORIOS
+    # ===============================
+    def test_missing_required_fields(self):
+        invalid_data = {}
+
+        response, status = self.controller.create_user(invalid_data)
+
+        self.assertEqual(status, 400)
+        self.assertIn("errors", response)
+        self.assertIn("name", response["errors"])
+
+    # ===============================
+    # TEST EMAIL INVALIDO UNIVERSITARIO
+    # ===============================
+    @patch("app.controllers.usercontroller.Participant")
+    @patch("app.controllers.usercontroller.Responsible")
+    def test_invalid_university_email(
+        self, mock_responsible, mock_participant
     ):
-        fake_participant = MagicMock()
-        fake_participant.id = 1
-        fake_participant.firstName = "Carlos"
-        fake_participant.lastName = "Lopez"
-        fake_participant.external_id = "abc123"
-        mock_participant.query.filter_by.return_value.first.return_value = (
-            fake_participant
-        )
+        data = self.valid_data.copy()
+        data["email"] = "juan@gmail.com"
 
-        data = {
-            "participant_external_id": None,  # obligatorio faltante
-            "weight": -5,  # inválido
-            "height": 3.0,  # fuera de rango
-            "waistPerimeter": 0.1,  # numérico pero no obligatorio
-            "armPerimeter": -1,  # inválido
-            "legPerimeter": 5.0,  # fuera de rango
-            "calfPerimeter": None,  # permitido
-            "date": None,  # obligatorio faltante
-        }
+        mock_participant.query.filter_by.return_value.first.return_value = None
+        mock_responsible.query.filter_by.return_value.first.return_value = None
 
-        result = self.controller.register(data)
+        response, status = self.controller.create_user(data)
 
-        self.assertEqual(result["code"], 400)
-        self.assertEqual(result["status"], "error")
-        self.assertIn("participant_external_id", result["errors"])
-        self.assertIn("weight", result["errors"])
-        self.assertIn("height", result["errors"])
-        self.assertIn("armPerimeter", result["errors"])
-        self.assertIn("date", result["errors"])
+        self.assertEqual(status, 400)
+        self.assertIn("email", response["errors"])
 
-        mock_session.add.assert_not_called()
-        mock_session.commit.assert_not_called()
-        mock_log_activity.assert_not_called()
+    # ===============================
+    # TEST DNI DUPLICADO
+    # ===============================
+    @patch("app.controllers.usercontroller.Participant")
+    @patch("app.controllers.usercontroller.Responsible")
+    def test_duplicate_dni(
+        self, mock_responsible, mock_participant
+    ):
+        mock_participant.query.filter_by.return_value.first.return_value = MagicMock()
+
+        response, status = self.controller.create_user(self.valid_data)
+
+        self.assertEqual(status, 400)
+        self.assertIn("dni", response["errors"])
 
 
 if __name__ == "__main__":
