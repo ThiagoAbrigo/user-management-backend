@@ -87,16 +87,20 @@ class UserController:
 
         email = data["email"].strip().lower()
 
-        if data["estate"] == "UNIVERSITARIO":
-            if not email.endswith("@unl.edu.ec"):
-                errores["email"] = "El correo debe pertenecer al dominio @unl.edu.ec"
-
-        elif data["estate"] == "MIEMBRO EXTERNO":
-            import re
-
-            email_regex = r"^[\w\.-]+@[\w\.-]+\.\w+$"
-            if not re.match(email_regex, email):
-                errores["email"] = "Formato de correo electrónico inválido"
+        import re
+        email_regex = r"^[\w\.-]+@[\w\.-]+\.\w+$"
+        
+        # Validar formato básico primero
+        if not re.match(email_regex, email):
+            errores["email"] = "Formato de correo electrónico inválido"
+        else:
+            # Validar según el estamento
+            if data["estate"] == "UNIVERSITARIO":
+                if not email.endswith("@unl.edu.ec"):
+                    errores["email"] = "El correo debe pertenecer al dominio @unl.edu.ec"
+            elif data["estate"] == "MIEMBRO EXTERNO":
+                if email.endswith("@unl.edu.ec"):
+                    errores["email"] = "El dominio @unl.edu.ec no está permitido"
 
         # ==============================
         # VALIDAR EDAD PERMITIDA
@@ -128,7 +132,7 @@ class UserController:
             errores["dni"] = "El DNI ya está registrado"
 
         if Responsible.query.filter_by(dni=data["dni"]).first():
-            errores["dni"] = "El DNI ya está registrado como representante"
+            errores["dni"] = "El DNI ya está registrado"
 
         # -------- EMAIL PARTICIPANTE --------
         if Participant.query.filter_by(email=data["email"]).first():
@@ -178,7 +182,7 @@ class UserController:
                 # -------- DNI RESPONSABLE --------
                 if Participant.query.filter_by(dni=responsible_data["dni"]).first():
                     errores["responsibleDni"] = (
-                        "El DNI del representante no puede ser de un participante"
+                        "El DNI ya está registrado "
                     )
 
                 # -------- EMAIL RESPONSABLE (si existe en modelo) --------
@@ -267,220 +271,245 @@ class UserController:
         except Exception as e:
             return {"msg": "Error al buscar responsable", "error": str(e)}, 500
 
-def update_user(self, external_id, data):
-        errores = {}
+    def update_user(self, external_id, data):
+            errores = {}
 
-        user = Participant.query.filter_by(external_id=external_id).first()
+            user = Participant.query.filter_by(external_id=external_id).first()
 
-        if not user:
-            return {"msg": "Usuario no encontrado"}, 404
+            if not user:
+                return {"msg": "Usuario no encontrado"}, 404
 
-        campo_esp = {
-            "name": "nombre",
-            "estate": "estamento",
-            "age": "edad",
-            "dni": "DNI",
-            "email": "correo electrónico",
-            "password": "contraseña",
-            "address": "dirección",
-            "phone": "teléfono",
-        }
+            campo_esp = {
+                "name": "nombre",
+                "estate": "estamento",
+                "age": "edad",
+                "dni": "DNI",
+                "email": "correo electrónico",
+                "password": "contraseña",
+                "address": "dirección",
+                "phone": "teléfono",
+            }
+            # ==============================
+            # VALIDAR CAMPOS OBLIGATORIOS DEL PARTICIPANTE
+            # ==============================
 
-        # ==============================
-        # VALIDAR ESTAMENTO
-        # ==============================
+            required_fields = [
+                "name",
+                "age",
+                "dni",
+                "email",
+                "address",
+            ]
 
-        estate = data.get("estate", user.estate)
+            for field in required_fields:
+                if not data.get(field):
+                    nombre_campo = campo_esp.get(field, field)
+                    errores[field] = f"El campo {nombre_campo} es obligatorio"
 
-        if estate not in ["UNIVERSITARIO", "MIEMBRO EXTERNO"]:
-            errores["estate"] = "Estamento inválido"
+            # Si ya hay errores de campos obligatorios, no seguir validando
+            if errores:
+                return {"errors": errores, "msg": "Errores de validación"}, 400
 
-        # ==============================
-        # VALIDAR EMAIL
-        # ==============================
+            # ==============================
+            # VALIDAR ESTAMENTO
+            # ==============================
 
-        email = data.get("email", user.email).strip().lower()
+            estate = data.get("estate", user.estate)
 
-        if estate == "UNIVERSITARIO":
-            if not email.endswith("@unl.edu.ec"):
-                errores["email"] = "El correo debe pertenecer al dominio @unl.edu.ec"
+            if estate not in ["UNIVERSITARIO", "MIEMBRO EXTERNO"]:
+                errores["estate"] = "Estamento inválido"
 
-        elif estate == "MIEMBRO EXTERNO":
+            # ==============================
+            # VALIDAR EMAIL
+            # ==============================
+
+            email = data["email"].strip().lower()
+
             import re
             email_regex = r"^[\w\.-]+@[\w\.-]+\.\w+$"
+            
+            # Validar formato básico primero
             if not re.match(email_regex, email):
                 errores["email"] = "Formato de correo electrónico inválido"
+            else:
+                # Validar según el estamento
+                if data["estate"] == "UNIVERSITARIO":
+                    if not email.endswith("@unl.edu.ec"):
+                        errores["email"] = "El correo debe pertenecer al dominio @unl.edu.ec"
+                elif data["estate"] == "MIEMBRO EXTERNO":
+                    if email.endswith("@unl.edu.ec"):
+                        errores["email"] = "El dominio @unl.edu.ec no está permitido"
 
-        # ==============================
-        # VALIDAR EDAD
-        # ==============================
+            # ==============================
+            # VALIDAR EDAD
+            # ==============================
 
-        try:
-            age = int(data.get("age", user.age))
+            try:
+                age = int(data.get("age", user.age))
 
-            if age < 5 or age > 60:
-                errores["age"] = "La edad debe estar entre 5 y 60 años"
+                if age < 5 or age > 60:
+                    errores["age"] = "La edad debe estar entre 5 y 60 años"
 
-            if estate == "UNIVERSITARIO" and age < 18:
-                errores["age"] = "Deben ser mayores de edad"
+                if estate == "UNIVERSITARIO" and age < 18:
+                    errores["age"] = "Deben ser mayores de edad"
 
-        except ValueError:
-            errores["age"] = "Edad inválida"
-            age = user.age
+            except ValueError:
+                errores["age"] = "Edad inválida"
+                age = user.age
 
-        # ==============================
-        # VALIDAR DNI
-        # ==============================
+            # ==============================
+            # VALIDAR DNI
+            # ==============================
 
-        dni = data.get("dni", user.dni)
+            dni = data.get("dni", user.dni)
 
-        if not dni.isdigit() or len(dni) != 10:
-            errores["dni"] = "La cédula debe tener 10 dígitos numéricos"
+            if not dni.isdigit() or len(dni) != 10:
+                errores["dni"] = "La cédula debe tener 10 dígitos numéricos"
 
-        # ==============================
-        # VALIDAR UNICIDAD (EXCLUYENDO AL MISMO USUARIO)
-        # ==============================
+            # ==============================
+            # VALIDAR UNICIDAD (EXCLUYENDO AL MISMO USUARIO)
+            # ==============================
 
-        # DNI
-        existing_dni = Participant.query.filter(
-            Participant.dni == dni,
-            Participant.id != user.id
-        ).first()
+            # DNI
+            existing_dni = Participant.query.filter(
+                Participant.dni == dni,
+                Participant.id != user.id
+            ).first()
 
-        if existing_dni:
-            errores["dni"] = "El DNI ya está registrado"
+            if existing_dni:
+                errores["dni"] = "El DNI ya está registrado"
 
-        existing_responsible_dni = Responsible.query.filter_by(dni=dni).first()
-        if existing_responsible_dni:
-            errores["dni"] = "El DNI ya está registrado como representante"
+            existing_responsible_dni = Responsible.query.filter_by(dni=dni).first()
+            if existing_responsible_dni:
+                errores["dni"] = "El DNI ya está registrado"
 
-        # EMAIL
-        existing_email = Participant.query.filter(
-            Participant.email == email,
-            Participant.id != user.id
-        ).first()
+            # EMAIL
+            existing_email = Participant.query.filter(
+                Participant.email == email,
+                Participant.id != user.id
+            ).first()
 
-        if existing_email:
-            errores["email"] = "El correo electrónico ya está registrado"
+            if existing_email:
+                errores["email"] = "El correo electrónico ya está registrado"
 
-        # ==============================
-        # VALIDAR REGLA DE MENOR
-        # ==============================
+            # ==============================
+            # VALIDAR REGLA DE MENOR
+            # ==============================
 
-        is_minor = age < 18
-        needs_responsible = is_minor and estate == "MIEMBRO EXTERNO"
+            is_minor = age < 18
+            needs_responsible = is_minor and estate == "MIEMBRO EXTERNO"
 
-        responsible_data = data.get("responsible")
+            responsible_data = data.get("responsible")
 
-        existing_responsible = Responsible.query.filter_by(
-            participant_id=user.id
-        ).first()
+            existing_responsible = Responsible.query.filter_by(
+                participant_id=user.id
+            ).first()
 
-        if needs_responsible:
+            if needs_responsible:
 
-            if not responsible_data and not existing_responsible:
-                errores["responsible"] = (
-                    "Los menores MIEMBRO EXTERNO requieren representante"
-                )
-
-            if responsible_data:
-
-                responsible_dni = responsible_data.get("dni", "").strip()
-
-                # No puede ser igual al participante
-                if responsible_dni == dni:
-                    errores["responsibleDni"] = (
-                        "El DNI del responsable no puede ser igual al del participante"
+                if not responsible_data and not existing_responsible:
+                    errores["responsible"] = (
+                        "Los menores MIEMBRO EXTERNO requieren representante"
                     )
 
-                # Debe tener 10 dígitos numéricos
-                if not responsible_dni.isdigit() or len(responsible_dni) != 10:
-                    errores["responsibleDni"] = (
-                        "La cédula del representante debe tener 10 dígitos numéricos"
-                    )
+                if responsible_data:
 
-                # No puede existir como PARTICIPANTE
-                existing_participant_dni = Participant.query.filter_by(
-                    dni=responsible_dni
-                ).first()
+                    responsible_dni = responsible_data.get("dni", "").strip()
 
-                if existing_participant_dni:
-                    errores["responsibleDni"] = (
-                        "La cédula ya está registrada"
-                    )
-
-                # No puede existir como OTRO RESPONSABLE
-                existing_other_responsible = Responsible.query.filter(
-                    Responsible.dni == responsible_dni,
-                    Responsible.participant_id != user.id
-                ).first()
-
-                if existing_other_responsible:
-                    errores["responsibleDni"] = (
-                        "La cédula ya está registrada"
-                    )
-
-                # Validar campos obligatorios
-                required_fields = ["name", "dni", "phone"]
-
-                for field in required_fields:
-                    if not responsible_data.get(field):
-                        nombre_campo = campo_esp.get(field, field)
-                        errores[f"responsible{field.capitalize()}"] = (
-                            f"El campo {nombre_campo} del representante es obligatorio"
+                    # No puede ser igual al participante
+                    if responsible_dni == dni:
+                        errores["responsibleDni"] = (
+                            "El DNI del responsable no puede ser igual al del participante"
                         )
 
-        # Si hay errores
-        if errores:
-            return {"errors": errores, "msg": "Errores de validación"}, 400
+                    # Debe tener 10 dígitos numéricos
+                    if not responsible_dni.isdigit() or len(responsible_dni) != 10:
+                        errores["responsibleDni"] = (
+                            "La cédula del representante debe tener 10 dígitos numéricos"
+                        )
 
-        # ==============================
-        # ACTUALIZAR USUARIO
-        # ==============================
+                    # No puede existir como PARTICIPANTE
+                    existing_participant_dni = Participant.query.filter_by(
+                        dni=responsible_dni
+                    ).first()
 
-        user.name = data.get("name", user.name)
-        user.estate = estate
-        user.age = age
-        user.dni = dni
-        user.email = email
-        user.address = data.get("address", user.address)
+                    if existing_participant_dni:
+                        errores["responsibleDni"] = (
+                            "El DNI ya está registrado"
+                        )
 
-        if data.get("password"):
-            user.password = generate_password_hash(data["password"])
+                    # No puede existir como OTRO RESPONSABLE
+                    existing_other_responsible = Responsible.query.filter(
+                        Responsible.dni == responsible_dni,
+                        Responsible.participant_id != user.id
+                    ).first()
 
-        # ==============================
-        # MANEJAR RESPONSABLE
-        # ==============================
+                    if existing_other_responsible:
+                        errores["responsibleDni"] = (
+                            "El DNI ya está registrado"
+                        )
 
-        if needs_responsible:
+                    # Validar campos obligatorios
+                    required_fields = ["name", "dni", "phone"]
 
-            if existing_responsible:
-                existing_responsible.name = responsible_data.get(
-                    "name", existing_responsible.name
-                )
-                existing_responsible.dni = responsible_data.get(
-                    "dni", existing_responsible.dni
-                )
-                existing_responsible.phone = responsible_data.get(
-                    "phone", existing_responsible.phone
-                )
+                    for field in required_fields:
+                        if not responsible_data.get(field):
+                            nombre_campo = campo_esp.get(field, field)
+                            errores[f"responsible{field.capitalize()}"] = (
+                                f"El campo {nombre_campo} del representante es obligatorio"
+                            )
+
+            # Si hay errores
+            if errores:
+                return {"errors": errores, "msg": "Errores de validación"}, 400
+
+            # ==============================
+            # ACTUALIZAR USUARIO
+            # ==============================
+
+            user.name = data.get("name", user.name)
+            user.estate = estate
+            user.age = age
+            user.dni = dni
+            user.email = email
+            user.address = data.get("address", user.address)
+
+            if data.get("password"):
+                user.password = generate_password_hash(data["password"])
+
+            # ==============================
+            # MANEJAR RESPONSABLE
+            # ==============================
+
+            if needs_responsible:
+
+                if existing_responsible:
+                    existing_responsible.name = responsible_data.get(
+                        "name", existing_responsible.name
+                    )
+                    existing_responsible.dni = responsible_data.get(
+                        "dni", existing_responsible.dni
+                    )
+                    existing_responsible.phone = responsible_data.get(
+                        "phone", existing_responsible.phone
+                    )
+                else:
+                    new_responsible = Responsible(
+                        name=responsible_data["name"],
+                        dni=responsible_data["dni"],
+                        phone=responsible_data["phone"],
+                        participant_id=user.id,
+                    )
+                    db.session.add(new_responsible)
+
             else:
-                new_responsible = Responsible(
-                    name=responsible_data["name"],
-                    dni=responsible_data["dni"],
-                    phone=responsible_data["phone"],
-                    participant_id=user.id,
-                )
-                db.session.add(new_responsible)
+                if existing_responsible:
+                    db.session.delete(existing_responsible)
 
-        else:
-            if existing_responsible:
-                db.session.delete(existing_responsible)
+            try:
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                return {"msg": f"Error al actualizar usuario: {str(e)}"}, 500
 
-        try:
-            db.session.commit()
-        except Exception as e:
-            db.session.rollback()
-            return {"msg": f"Error al actualizar usuario: {str(e)}"}, 500
-
-        return {"msg": "Usuario actualizado correctamente"}, 200
+            return {"msg": "Usuario actualizado correctamente"}, 200
