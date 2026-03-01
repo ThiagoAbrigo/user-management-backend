@@ -1,44 +1,24 @@
-from werkzeug.security import check_password_hash
-from app.utils.responses import success_response, error_response
-from app.models import Participant
-
+from flask import jsonify
+from app.models.cuenta import Cuenta
 
 class AuthController:
-
     def login(self, data):
-        email = data.get("email")
-        password = data.get("password")
+        """
+        data: dict con 'correoElectronico' y 'contrasenia'
+        Retorna JSON con éxito o error
+        """
+        correo = data.get('correoElectronico')
+        contrasenia = data.get('contrasenia')
 
-        if not email or not password:
-            return error_response("Email y contraseña son obligatorios"), 400
+        if not correo or not contrasenia:
+            return jsonify({'error': 'Correo y contraseña son requeridos'}), 400
 
-        participant = Participant.query.filter_by(email=email).first()
+        cuenta = Cuenta.query.filter_by(correoElectronico=correo).first()
 
-        if not participant:
-            return error_response("Usuario no encontrado"), 404
+        if not cuenta or not cuenta.estado or not cuenta.check_password(contrasenia):
+            return jsonify({'error': 'Credenciales incorrectas'}), 401
 
-        if not check_password_hash(participant.password, password):
-            return error_response("Contraseña incorrecta"), 401
-
-        responsible = participant.responsibles[0] if participant.responsibles else None
-        return (
-            success_response(
-                "Login exitoso",
-                {
-                    "id": participant.id,
-                    "external_id": participant.external_id,
-                    "name": participant.name,
-                    "email": participant.email,
-                    "role": participant.role,
-                    "status": participant.status,
-                    "age": participant.age,
-                    "dni": participant.dni,
-                    "estate": participant.estate,
-                    "address": participant.address,
-                    "nombreResponsable": responsible.name if responsible else None,
-                    "dniResponsable": responsible.dni if responsible else None,
-                    "telefonoResponsable": responsible.phone if responsible else None,
-                },
-            ),
-            200,
-        )
+        return jsonify({
+            'message': 'Login exitoso',
+            'cuenta': cuenta.to_dict()
+        }), 200
