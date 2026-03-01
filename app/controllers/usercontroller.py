@@ -1,515 +1,335 @@
-from werkzeug.security import generate_password_hash
-from app.models.participant import Participant
-from app.models.responsible import Responsible
-from flask import request
+from flask import request, jsonify
 from app import db
-import uuid
+from app.models import Usuario, Cuenta, Rol, Perfil, Representante
+from datetime import datetime, date
 
 
 class UserController:
 
-    def get_users(self):
+    def listar_usuarios(self):
         try:
-            participants = Participant.query.all()
+            # Obtener todos los usuarios con sus relaciones
+            usuarios = Usuario.query.all()
 
-            data = []
+            # Si no hay usuarios
+            if not usuarios:
+                return (
+                    jsonify({"message": "No hay usuarios registrados", "usuarios": []}),
+                    200,
+                )
 
-            for p in participants:
-                responsible_name = None
+            # Construir la lista de usuarios con toda su información
+            lista_usuarios = []
+            for usuario in usuarios:
+                # Obtener la cuenta asociada (correo y rol)
+                cuenta = Cuenta.query.filter_by(usuario_id=usuario.id).first()
 
-                if hasattr(p, "responsibles") and p.responsibles:
-                    responsible_name = p.responsibles[0].name
+                # Obtener el perfil
+                perfil = Perfil.query.filter_by(usuario_id=usuario.id).first()
 
-                data.append(
+                # Obtener información del representante si existe
+                representante_info = None
+                if usuario.representante_id:
+                    representante = Representante.query.get(usuario.representante_id)
+                    if representante:
+                        representante_info = {
+                            "id": representante.id,
+                            "tipoIdentificacion": representante.tipoIdentificacion,
+                            "numeroIdentificacion": representante.numeroIdentificacion,
+                            "nombre": representante.nombre,
+                            "celular": representante.celular,
+                            "external_id": representante.external_id,
+                        }
+
+                estado_texto = "activo" if usuario.estado else "inactivo"
+
+                # Construir objeto del usuario
+                usuario_data = {
+                    "id": usuario.id,
+                    "external_id": usuario.external_id,
+                    "tipoIdentificacion": usuario.tipoIdentificacion,
+                    "numeroIdentificacion": usuario.numeroIdentificacion,
+                    "nombre": usuario.nombre,
+                    "apellido": usuario.apellido,
+                    "fechaNacimiento": (
+                        usuario.fechaNacimiento.strftime("%Y-%m-%d")
+                        if usuario.fechaNacimiento
+                        else None
+                    ),
+                    "edad": (
+                        usuario.calcular_edad()
+                        if hasattr(usuario, "calcular_edad")
+                        else None
+                    ),
+                    "estado": estado_texto,
+                    "cuenta": (
+                        {
+                            "correoElectronico": (
+                                cuenta.correoElectronico if cuenta else None
+                            ),
+                            "rol": cuenta.rol.nombre if cuenta and cuenta.rol else None,
+                        }
+                        if cuenta
+                        else None
+                    ),
+                    "perfil": (
+                        {
+                            "fotoURL": perfil.fotoURL if perfil else None,
+                            "descripcion": perfil.descripcion if perfil else None,
+                            "celular": perfil.celular if perfil else None,
+                        }
+                        if perfil
+                        else None
+                    ),
+                    "representante": representante_info,
+                }
+
+                lista_usuarios.append(usuario_data)
+
+            return (
+                jsonify(
                     {
-                        "external_id": p.external_id,
-                        "name": p.name,
-                        "email": p.email,
-                        "estate": p.estate,
-                        "dni": p.dni,
-                        "age": p.age,
-                        "status": p.status,
-                        "responsible_name": responsible_name,
+                        "message": "Usuarios listados correctamente",
+                        "total": len(lista_usuarios),
+                        "usuarios": lista_usuarios,
                     }
-                )
-
-            return {"msg": "Usuarios listados correctamente", "data": data}, 200
-
-        except Exception as e:
-            return {"msg": "Error interno del servidor", "error": str(e)}, 500
-
-    def create_user(self, data):
-        errores = {}
-        campo_esp = {
-            "name": "nombre",
-            "estate": "estamento",
-            "age": "edad",
-            "dni": "DNI",
-            "email": "correo electrónico",
-            "password": "contraseña",
-            "address": "dirección",
-            "phone": "teléfono",
-        }
-
-        # ==============================
-        # VALIDAR CAMPOS OBLIGATORIOS DEL PARTICIPANTE
-        # ==============================
-
-        required_fields = [
-            "name",
-            "estate",
-            "age",
-            "dni",
-            "email",
-            "password",
-            "address",
-        ]
-
-        for field in required_fields:
-            if not data.get(field):
-                nombre_campo = campo_esp.get(field, field)
-                errores[field] = f"El campo {nombre_campo} es obligatorio"
-
-        # Si ya hay errores de campos obligatorios, no seguir validando
-        if errores:
-            return {"errors": errores, "msg": "Errores de validación"}, 400
-
-        # ==============================
-        # VALIDAR ESTAMENTO
-        # ==============================
-
-        if data["estate"] not in ["UNIVERSITARIO", "MIEMBRO EXTERNO"]:
-            errores["estate"] = "Estamento inválido"
-
-        # ==============================
-        # VALIDAR EMAIL SEGÚN ESTAMENTO
-        # ==============================
-
-        email = data["email"].strip().lower()
-
-        import re
-        email_regex = r"^[\w\.-]+@[\w\.-]+\.\w+$"
-        
-        # Validar formato básico primero
-        if not re.match(email_regex, email):
-            errores["email"] = "Formato de correo electrónico inválido"
-        else:
-            # Validar según el estamento
-            if data["estate"] == "UNIVERSITARIO":
-                if not email.endswith("@unl.edu.ec"):
-                    errores["email"] = "El correo debe pertenecer al dominio @unl.edu.ec"
-            elif data["estate"] == "MIEMBRO EXTERNO":
-                if email.endswith("@unl.edu.ec"):
-                    errores["email"] = "El dominio @unl.edu.ec no está permitido"
-
-        # ==============================
-        # VALIDAR EDAD PERMITIDA
-        # ==============================
-
-        try:
-            age = int(data["age"])
-            if age < 5 or age > 60:
-                errores["age"] = "La edad debe estar entre 5 y 60 años"
-            if data["estate"] == "UNIVERSITARIO" and age < 18:
-                errores["age"] = "Deben ser mayores de edad"
-        except ValueError:
-            errores["age"] = "Edad inválida"
-
-        # ==============================
-        # VALIDAR CÉDULA
-        # ==============================
-
-        dni = data["dni"]
-        if not dni.isdigit() or len(dni) != 10:
-            errores["dni"] = "La cédula debe tener 10 dígitos numéricos"
-
-        # ==============================
-        # VALIDAR DNI Y EMAIL ÚNICOS GLOBALMENTE
-        # ==============================
-
-        # -------- DNI PARTICIPANTE --------
-        if Participant.query.filter_by(dni=data["dni"]).first():
-            errores["dni"] = "El DNI ya está registrado"
-
-        if Responsible.query.filter_by(dni=data["dni"]).first():
-            errores["dni"] = "El DNI ya está registrado"
-
-        # -------- EMAIL PARTICIPANTE --------
-        if Participant.query.filter_by(email=data["email"]).first():
-            errores["email"] = "El correo electrónico ya está registrado"
-
-        # Solo si Responsible tiene email en su modelo
-        if hasattr(Responsible, "email"):
-            if Responsible.query.filter_by(email=data["email"]).first():
-                errores["email"] = (
-                    "El correo electrónico ya está registrado como representante"
-                )
-
-        # ==============================
-        # VALIDAR REGLA DE MENOR DE EDAD
-        # ==============================
-
-        age = int(data["age"])
-        is_minor = age < 18
-
-        needs_responsible = is_minor and data["estate"] == "MIEMBRO EXTERNO"
-
-        # Si necesita representante, validar datos
-        if needs_responsible:
-            responsible_data = data.get("responsible")
-
-            if responsible_data:
-                # Validación DNI igual al participante
-                if responsible_data.get("dni") == data["dni"]:
-                    errores["responsibleDni"] = (
-                        "El DNI del responsable no puede ser igual al del participante"
-                    )
-
-            if not responsible_data:
-                errores["responsible"] = (
-                    "Los menores MIEMBRO EXTERNO requieren representante"
-                )
-            else:
-                responsible_required = ["name", "dni", "phone"]
-
-                for field in responsible_required:
-                    if not responsible_data.get(field):
-                        nombre_campo = campo_esp.get(field, field)
-                        errores[f"responsible{field.capitalize()}"] = (
-                            f"El campo {nombre_campo} del representante es obligatorio"
-                        )
-
-                # -------- DNI RESPONSABLE --------
-                if Participant.query.filter_by(dni=responsible_data["dni"]).first():
-                    errores["responsibleDni"] = (
-                        "El DNI ya está registrado "
-                    )
-
-                # -------- EMAIL RESPONSABLE (si existe en modelo) --------
-                if hasattr(Responsible, "email") and responsible_data.get("email"):
-                    if Participant.query.filter_by(
-                        email=responsible_data["email"]
-                    ).first():
-                        errores["responsibleEmail"] = (
-                            "El correo electrónico del representante ya pertenece a un participante"
-                        )
-
-                    if Responsible.query.filter_by(
-                        email=responsible_data["email"]
-                    ).first():
-                        errores["responsibleEmail"] = (
-                            "El correo electrónico del representante ya está registrado"
-                        )
-
-        # Si hay errores, devolver todos
-        if errores:
-            return {"errors": errores, "msg": "Errores de validación"}, 400
-
-        # ==============================
-        # CREAR PARTICIPANTE
-        # ==============================
-
-        new_user = Participant(
-            name=data["name"],
-            estate=data["estate"],
-            age=age,
-            dni=data["dni"],
-            email=data["email"],
-            role="USUARIO",
-            password=generate_password_hash(data["password"]),
-            address=data["address"],
-            status="ACTIVO",
-        )
-
-        db.session.add(new_user)
-        db.session.flush()
-
-        # ==============================
-        # CREAR RESPONSABLE SOLO SI APLICA
-        # ==============================
-
-        if needs_responsible:
-            responsible_data = data["responsible"]
-
-            new_responsible = Responsible(
-                name=responsible_data["name"],
-                dni=responsible_data["dni"],
-                phone=responsible_data["phone"],
-                participant_id=new_user.id,
+                ),
+                200,
             )
 
-            db.session.add(new_responsible)
-
-        try:
-            db.session.commit()
         except Exception as e:
-            db.session.rollback()
-            return {"msg": f"Error al registrar usuario: {str(e)}"}, 500
+            return jsonify({"error": str(e)}), 500
 
-        return {
-            "msg": "Usuario creado correctamente",
-            "external_id": new_user.external_id,
-        }, 201
-    
-    def get_responsible_by_dni(self, dni):
+    def registrar_usuario(self):
         try:
-            # Buscamos al responsable por su DNI/Cédula
-            responsible = Responsible.query.filter_by(dni=dni).first()
-
-            if not responsible:
-                return {"msg": "Responsable no encontrado", "data": None}, 404
-
-            # Devolvemos la data que el frontend necesita para autorrellenar
-            data = {
-                "name": responsible.name,
-                "dni": responsible.dni,
-                "phone": responsible.phone
-            }
-
-            return {"msg": "Responsable encontrado", "data": data}, 200
-
-        except Exception as e:
-            return {"msg": "Error al buscar responsable", "error": str(e)}, 500
-
-    def update_user(self, external_id, data):
+            data = request.get_json()
             errores = {}
 
-            user = Participant.query.filter_by(external_id=external_id).first()
-
-            if not user:
-                return {"msg": "Usuario no encontrado"}, 404
-
-            campo_esp = {
-                "name": "nombre",
-                "estate": "estamento",
-                "age": "edad",
-                "dni": "DNI",
-                "email": "correo electrónico",
-                "password": "contraseña",
-                "address": "dirección",
-                "phone": "teléfono",
-            }
-            # ==============================
-            # VALIDAR CAMPOS OBLIGATORIOS DEL PARTICIPANTE
-            # ==============================
-
-            required_fields = [
-                "name",
-                "age",
-                "dni",
-                "email",
-                "address",
+            campos_requeridos = [
+                "tipoIdentificacion",
+                "numeroIdentificacion",
+                "nombre",
+                "apellido",
+                "fechaNacimiento",
+                "correoElectronico",
+                "password",
+                "rol",
             ]
 
-            for field in required_fields:
-                if not data.get(field):
-                    nombre_campo = campo_esp.get(field, field)
-                    errores[field] = f"El campo {nombre_campo} es obligatorio"
+            # Validar campos requeridos
+            for campo in campos_requeridos:
+                if campo not in data or not data[campo]:
+                    errores[campo] = "Campo requerido"
 
-            # Si ya hay errores de campos obligatorios, no seguir validando
-            if errores:
-                return {"errors": errores, "msg": "Errores de validación"}, 400
+            # Continuar con las demás validaciones
+            if data:
+                # Validar rol
+                rol = None
+                if "rol" in data and data["rol"]:
+                    rol = Rol.query.filter_by(nombre=data["rol"]).first()
+                    if not rol:
+                        errores["rol"] = "Rol no válido"
 
-            # ==============================
-            # VALIDAR ESTAMENTO
-            # ==============================
+                # Validar fecha de nacimiento
+                fecha_nacimiento = None
+                if "fechaNacimiento" in data and data["fechaNacimiento"]:
+                    try:
+                        fecha_nacimiento = datetime.strptime(
+                            data["fechaNacimiento"], "%Y-%m-%d"
+                        ).date()
+                        if fecha_nacimiento > datetime.now().date():
+                            errores["fechaNacimiento"] = "La fecha de nacimiento no puede ser futura"
+                    except ValueError:
+                        errores["fechaNacimiento"] = "Formato de fecha inválido. Use YYYY-MM-DD"
 
-            estate = data.get("estate", user.estate)
+                # Validar correo según rol
+                if rol and "correoElectronico" in data and data["correoElectronico"]:
+                    correo = data["correoElectronico"]
+                    dominio_unl = "@unl.edu.ec"
 
-            if estate not in ["UNIVERSITARIO", "MIEMBRO EXTERNO"]:
-                errores["estate"] = "Estamento inválido"
-
-            # ==============================
-            # VALIDAR EMAIL
-            # ==============================
-
-            email = data["email"].strip().lower()
-
-            import re
-            email_regex = r"^[\w\.-]+@[\w\.-]+\.\w+$"
-            
-            # Validar formato básico primero
-            if not re.match(email_regex, email):
-                errores["email"] = "Formato de correo electrónico inválido"
-            else:
-                # Validar según el estamento
-                if data["estate"] == "UNIVERSITARIO":
-                    if not email.endswith("@unl.edu.ec"):
-                        errores["email"] = "El correo debe pertenecer al dominio @unl.edu.ec"
-                elif data["estate"] == "MIEMBRO EXTERNO":
-                    if email.endswith("@unl.edu.ec"):
-                        errores["email"] = "El dominio @unl.edu.ec no está permitido"
-
-            # ==============================
-            # VALIDAR EDAD
-            # ==============================
-
-            try:
-                age = int(data.get("age", user.age))
-
-                if age < 5 or age > 60:
-                    errores["age"] = "La edad debe estar entre 5 y 60 años"
-
-                if estate == "UNIVERSITARIO" and age < 18:
-                    errores["age"] = "Deben ser mayores de edad"
-
-            except ValueError:
-                errores["age"] = "Edad inválida"
-                age = user.age
-
-            # ==============================
-            # VALIDAR DNI
-            # ==============================
-
-            dni = data.get("dni", user.dni)
-
-            if not dni.isdigit() or len(dni) != 10:
-                errores["dni"] = "La cédula debe tener 10 dígitos numéricos"
-
-            # ==============================
-            # VALIDAR UNICIDAD (EXCLUYENDO AL MISMO USUARIO)
-            # ==============================
-
-            # DNI
-            existing_dni = Participant.query.filter(
-                Participant.dni == dni,
-                Participant.id != user.id
-            ).first()
-
-            if existing_dni:
-                errores["dni"] = "El DNI ya está registrado"
-
-            existing_responsible_dni = Responsible.query.filter_by(dni=dni).first()
-            if existing_responsible_dni:
-                errores["dni"] = "El DNI ya está registrado"
-
-            # EMAIL
-            existing_email = Participant.query.filter(
-                Participant.email == email,
-                Participant.id != user.id
-            ).first()
-
-            if existing_email:
-                errores["email"] = "El correo electrónico ya está registrado"
-
-            # ==============================
-            # VALIDAR REGLA DE MENOR
-            # ==============================
-
-            is_minor = age < 18
-            needs_responsible = is_minor and estate == "MIEMBRO EXTERNO"
-
-            responsible_data = data.get("responsible")
-
-            existing_responsible = Responsible.query.filter_by(
-                participant_id=user.id
-            ).first()
-
-            if needs_responsible:
-
-                if not responsible_data and not existing_responsible:
-                    errores["responsible"] = (
-                        "Los menores MIEMBRO EXTERNO requieren representante"
-                    )
-
-                if responsible_data:
-
-                    responsible_dni = responsible_data.get("dni", "").strip()
-
-                    # No puede ser igual al participante
-                    if responsible_dni == dni:
-                        errores["responsibleDni"] = (
-                            "El DNI del responsable no puede ser igual al del participante"
-                        )
-
-                    # Debe tener 10 dígitos numéricos
-                    if not responsible_dni.isdigit() or len(responsible_dni) != 10:
-                        errores["responsibleDni"] = (
-                            "La cédula del representante debe tener 10 dígitos numéricos"
-                        )
-
-                    # No puede existir como PARTICIPANTE
-                    existing_participant_dni = Participant.query.filter_by(
-                        dni=responsible_dni
-                    ).first()
-
-                    if existing_participant_dni:
-                        errores["responsibleDni"] = (
-                            "El DNI ya está registrado"
-                        )
-
-                    # No puede existir como OTRO RESPONSABLE
-                    existing_other_responsible = Responsible.query.filter(
-                        Responsible.dni == responsible_dni,
-                        Responsible.participant_id != user.id
-                    ).first()
-
-                    if existing_other_responsible:
-                        errores["responsibleDni"] = (
-                            "El DNI ya está registrado"
-                        )
-
-                    # Validar campos obligatorios
-                    required_fields = ["name", "dni", "phone"]
-
-                    for field in required_fields:
-                        if not responsible_data.get(field):
-                            nombre_campo = campo_esp.get(field, field)
-                            errores[f"responsible{field.capitalize()}"] = (
-                                f"El campo {nombre_campo} del representante es obligatorio"
+                    if rol.nombre == "MIEMBRO_EXTERNO":
+                        if correo.lower().endswith(dominio_unl):
+                            errores["correoElectronico"] = (
+                                "Correo @unl.edu.ec no válido para miembros externos"
+                            )
+                    else:
+                        if not correo.lower().endswith(dominio_unl):
+                            errores["correoElectronico"] = (
+                                "Se requiere correo institucional @unl.edu.ec"
                             )
 
-            # Si hay errores
+                # Validar edad y representante
+                edad = None
+                if rol and fecha_nacimiento and "fechaNacimiento" not in errores:
+                    # Crear objeto temporal para calcular edad
+                    usuario_temp = Usuario(
+                        tipoIdentificacion=data.get("tipoIdentificacion", ""),
+                        numeroIdentificacion=data.get("numeroIdentificacion", ""),
+                        nombre=data.get("nombre", ""),
+                        apellido=data.get("apellido", ""),
+                        fechaNacimiento=fecha_nacimiento,
+                    )
+                    edad = usuario_temp.calcular_edad()
+
+                    roles_mayoria_edad = ["DOCENTE", "ADMINISTRADOR", "ESTUDIANTE"]
+
+                    if rol.nombre in roles_mayoria_edad and edad < 18:
+                        errores["fechaNacimiento"] = "Debe ser mayor de 18 años"
+
+                    if rol.nombre == "MIEMBRO_EXTERNO":
+                        if edad < 18:
+                            rep_data = data.get("representante")
+
+                            if not rep_data:
+                                errores["representante"] = "Representante obligatorio para miembros externos menores de edad"
+                            else:
+                                # Validar campos del representante
+                                if "tipoIdentificacion" not in rep_data or not rep_data["tipoIdentificacion"]:
+                                    errores["rep_tipoIdentificacion"] = "Campo requerido"
+
+                                if "numeroIdentificacion" not in rep_data or not rep_data["numeroIdentificacion"]:
+                                    errores["rep_numeroIdentificacion"] = "Campo requerido"
+
+                                if "nombre" not in rep_data or not rep_data["nombre"]:
+                                    errores["rep_nombre"] = "Campo requerido"
+
+                                # Validar que el representante no sea el mismo que el usuario
+                                if rep_data.get("numeroIdentificacion") and rep_data["numeroIdentificacion"] == data.get("numeroIdentificacion"):
+                                    errores["rep_numeroIdentificacion"] = (
+                                        "El representante no puede tener la misma identificación que el usuario"
+                                    )
+
+                                # Validar si el representante ya existe
+                                if (rep_data.get("numeroIdentificacion") and 
+                                    "rep_numeroIdentificacion" not in errores and
+                                    rep_data["numeroIdentificacion"] != data.get("numeroIdentificacion")):
+                                    
+                                    usuario_rep = Usuario.query.filter_by(
+                                        numeroIdentificacion=rep_data["numeroIdentificacion"]
+                                    ).first()
+                                    representante_rep = Representante.query.filter_by(
+                                        numeroIdentificacion=rep_data["numeroIdentificacion"]
+                                    ).first()
+                                    
+                                    if usuario_rep or representante_rep:
+                                        errores["rep_numeroIdentificacion"] = (
+                                            "El número de identificación ya está registrado"
+                                        )
+
+                        elif edad >= 18 and "representante" in data:
+                            errores["representante"] = "Representante solo para miembros externos menores de edad"
+
+                # Validar correo duplicado
+                if (data.get("correoElectronico") and 
+                    "correoElectronico" not in errores):
+                    
+                    cuenta_existente = Cuenta.query.filter_by(
+                        correoElectronico=data["correoElectronico"]
+                    ).first()
+                    if cuenta_existente:
+                        errores["correoElectronico"] = "El correo electrónico ya está registrado"
+
+                # Validar identificación duplicada
+                if (data.get("numeroIdentificacion") and 
+                    "numeroIdentificacion" not in errores):
+                    
+                    num_identificacion = data["numeroIdentificacion"]
+
+                    usuario_existente = Usuario.query.filter_by(
+                        numeroIdentificacion=num_identificacion
+                    ).first()
+
+                    representante_existente = Representante.query.filter_by(
+                        numeroIdentificacion=num_identificacion
+                    ).first()
+
+                    if usuario_existente or representante_existente:
+                        errores["numeroIdentificacion"] = "El número de identificación ya está registrado"
+
+                # Validar contraseña
+                if (data.get("password") and 
+                    "password" not in errores):
+                    
+                    password = data["password"]
+                    if len(password) < 6:
+                        errores["password"] = "La contraseña debe tener al menos 6 caracteres"
+
+            # Si hay errores, devolver todos
             if errores:
-                return {"errors": errores, "msg": "Errores de validación"}, 400
+                return jsonify({"errores": errores}), 400
 
-            # ==============================
-            # ACTUALIZAR USUARIO
-            # ==============================
+            # Si llegamos aquí, no hay errores, proceder con el registro
+            # Validar que todos los datos necesarios existen
+            if not all(campo in data for campo in campos_requeridos):
+                return jsonify({"error": "Datos incompletos"}), 400
 
-            user.name = data.get("name", user.name)
-            user.estate = estate
-            user.age = age
-            user.dni = dni
-            user.email = email
-            user.address = data.get("address", user.address)
+            # Crear usuario
+            usuario = Usuario(
+                tipoIdentificacion=data["tipoIdentificacion"],
+                numeroIdentificacion=data["numeroIdentificacion"],
+                nombre=data["nombre"],
+                apellido=data["apellido"],
+                fechaNacimiento=fecha_nacimiento,
+            )
 
-            if data.get("password"):
-                user.password = generate_password_hash(data["password"])
+            db.session.add(usuario)
+            db.session.flush()
 
-            # ==============================
-            # MANEJAR RESPONSABLE
-            # ==============================
+            # Crear o asociar representante
+            representante = None
+            if rol.nombre == "MIEMBRO_EXTERNO" and edad < 18:
+                rep_data = data["representante"]
+                representante_existente = Representante.query.filter_by(
+                    numeroIdentificacion=rep_data["numeroIdentificacion"]
+                ).first()
 
-            if needs_responsible:
-
-                if existing_responsible:
-                    existing_responsible.name = responsible_data.get(
-                        "name", existing_responsible.name
-                    )
-                    existing_responsible.dni = responsible_data.get(
-                        "dni", existing_responsible.dni
-                    )
-                    existing_responsible.phone = responsible_data.get(
-                        "phone", existing_responsible.phone
-                    )
+                if representante_existente:
+                    representante = representante_existente
                 else:
-                    new_responsible = Responsible(
-                        name=responsible_data["name"],
-                        dni=responsible_data["dni"],
-                        phone=responsible_data["phone"],
-                        participant_id=user.id,
+                    representante = Representante(
+                        tipoIdentificacion=rep_data["tipoIdentificacion"],
+                        numeroIdentificacion=rep_data["numeroIdentificacion"],
+                        nombre=rep_data["nombre"],
+                        celular=rep_data.get("celular"),
                     )
-                    db.session.add(new_responsible)
+                    db.session.add(representante)
+                    db.session.flush()
 
-            else:
-                if existing_responsible:
-                    db.session.delete(existing_responsible)
+                usuario.representante_id = representante.id
 
-            try:
-                db.session.commit()
-            except Exception as e:
-                db.session.rollback()
-                return {"msg": f"Error al actualizar usuario: {str(e)}"}, 500
+            # Crear Cuenta
+            cuenta = Cuenta(
+                correoElectronico=data["correoElectronico"],
+                usuario_id=usuario.id,
+                rol_id=rol.id,
+            )
+            cuenta.set_password(data["password"])
+            db.session.add(cuenta)
 
-            return {"msg": "Usuario actualizado correctamente"}, 200
+            # Crear Perfil
+            perfil = Perfil(
+                usuario_id=usuario.id,
+                fotoURL=None,
+                descripcion="",
+                celular=None,
+                portafolio=None,
+                redesSociales=None,
+                habilidades=None,
+            )
+            db.session.add(perfil)
+
+            db.session.commit()
+
+            return (
+                jsonify(
+                    {
+                        "message": "Usuario registrado correctamente",
+                        "usuario_id": usuario.id,
+                    }
+                ),
+                201,
+            )
+
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": str(e)}), 500
