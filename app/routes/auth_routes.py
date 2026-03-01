@@ -2,9 +2,11 @@ from flask import Blueprint, request, jsonify
 from app import db
 from sqlalchemy import text
 from app.controllers.authcontroller import AuthController
+from app.controllers.perfilcontroller import PerfilController
 
 auth_bp = Blueprint("auth", __name__)
 controller = AuthController()
+perfil_controller = PerfilController()
 
 def response_handler(result):
     if isinstance(result, tuple):
@@ -13,10 +15,15 @@ def response_handler(result):
 
     return jsonify(result), 200
     
-@auth_bp.route("/auth/login", methods=["POST"])
+@auth_bp.route("/login", methods=["POST"])
 def login():
     data = request.json
-    return response_handler(controller.login(data))
+    return controller.login(data)
+
+@auth_bp.route("/profile", methods=["GET"])
+def profile():
+    external_id = request.args.get("external_id")
+    return perfil_controller.get_profile(external_id)
 
 @auth_bp.route("/health/db", methods=["GET"])
 def db_health():

@@ -1,7 +1,7 @@
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from app.config.config import Config
-from flask_cors import CORS 
+from flask_cors import CORS
 
 db = SQLAlchemy()
 
@@ -18,6 +18,8 @@ def create_app():
         # register blueprints
         from app.routes.user_routes import user_bp
         app.register_blueprint(user_bp, url_prefix='/api')
+        from app.routes.perfil_routes import perfil_bp
+        app.register_blueprint(perfil_bp, url_prefix='/api')
         from app.routes.auth_routes import auth_bp
         app.register_blueprint(auth_bp, url_prefix='/api')
     @app.teardown_appcontext

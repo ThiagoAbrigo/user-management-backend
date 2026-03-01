@@ -1,32 +1,21 @@
 from flask import Blueprint, jsonify, request
 from app.controllers.usercontroller import UserController
+from app.controllers.rolecontroller import RolController
 
 user_bp = Blueprint("users", __name__)
 controller = UserController()
-
-
-def response_handler(result):
-    if isinstance(result, tuple):
-        data, status_code = result
-        return jsonify(data), status_code
-
+rolecontrolle = RolController()
 
 @user_bp.route("/users", methods=["GET"])
 def listar_users():
-    result = controller.get_users()
-    return response_handler(result)
+    result = controller.listar_usuarios()
+    return result
 
 @user_bp.route("/save-user", methods=["POST"])
 def create_users():
-    data = request.get_json(silent=True) or {}
-    return response_handler(controller.create_user(data))
+    return controller.registrar_usuario()
 
-@user_bp.route("/responsibles/<dni>", methods=["GET"])
-def obtener_responsable(dni):
-    result = controller.get_responsible_by_dni(dni)
-    return response_handler(result)
-@user_bp.route("/participants/<string:external_id>", methods=["PUT"])
-def update_participant(external_id):
-    """Actualiza los datos de un participante y su responsable (si tiene)"""
-    data = request.get_json(silent=True) or {}
-    return response_handler(controller.update_user(external_id, data))
+@user_bp.route("/role", methods=["GET"])
+def listar_roles():
+    result = rolecontrolle.listar_roles()
+    return result
