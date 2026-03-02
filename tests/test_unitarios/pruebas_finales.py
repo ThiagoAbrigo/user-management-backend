@@ -4,7 +4,7 @@ from app.controllers.usercontroller import UserController
 from app.controllers.authcontroller import AuthController
 from werkzeug.security import check_password_hash
 
-
+#python -m unittest tests.pruebas_finales -v
 class TestUserController(unittest.TestCase):
     """Clase de prueba unificada para UserController y AuthController"""
 
